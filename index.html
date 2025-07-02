@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ultimate 3D Platformer - 100,500 Levels!</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 18px;
+            z-index: 100;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        
+        #levelInfo {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            font-size: 18px;
+            z-index: 100;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            text-align: right;
+        }
+        
+        #difficultyInfo {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            z-index: 100;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            text-align: center;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            font-size: 14px;
+            z-index: 100;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        
+        #saveControls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            color: white;
+            font-size: 14px;
+            z-index: 100;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+        
+        .save-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 5px 10px;
+            margin: 2px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .save-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        #message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            text-align: center;
+            z-index: 100;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            display: none;
+            background: rgba(0,0,0,0.7);
+            padding: 20px;
+            border-radius: 10px;
+        }
+        
+        canvas {
+            display: block;
+        }
+        
+        .easy { color: #90EE90; }
+        .hard { color: #FF6B47; }
+        .extreme { color: #FF1493; }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="ui">
+            <div>Score: <span id="score">0</span></div>
+            <div>Health: <span id="health">3</span></div>
+            <div>Deaths: <span id="deaths">0</span></div>
+        </div>
+        <div id="difficultyInfo">
+            <div id="difficultyName">EASY MODE</div>
+            <div style="font-size: 14px;">Complete 100 levels to unlock HARD</div>
+        </div>
+        <div id="levelInfo">
+            <div>Level: <span id="currentLevel">1</span> / <span id="maxLevel">100</span></div>
+            <div>Total Progress: <span id="totalProgress">0.001%</span></div>
+        </div>
+        <div id="controls">
+            <div>WASD: Move | SPACE: Jump | Camera follows automatically</div>
+            <div>Collect coins, avoid enemies, reach the green exit!</div>
+        </div>
+        <div id="saveControls">
+            <div>Save System:</div>
+            <button class="save-btn" onclick="saveGame()">Save Game</button>
+            <button class="save-btn" onclick="loadGame()">Load Game</button>
+            <button class="save-btn" onclick="resetProgress()">Reset All</button>
+        </div>
+        <div id="message"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Game variables
+        let scene, camera, renderer, player, platforms = [], collectibles = [], enemies = [], exits = [];
+        let keys = {};
+        let playerVelocity = { x: 0, y: 0, z: 0 };
+        let isGrounded = false;
+        let score = 0, health = 3, deaths = 0, currentLevel = 1;
+        let gameState = "playing";
+
+        // Difficulty system
+        let currentDifficulty = "easy"; // easy, hard, extreme
+        const difficulties = {
+            easy: { levels: 100, name: "EASY", color: "#90EE90", maxLevel: 100 },
+            hard: { levels: 500, name: "HARD", color: "#FF6B47", maxLevel: 600 },
+            extreme: { levels: 100000, name: "EXTREME", color: "#FF1493", maxLevel: 100600 }
+        };
+
+        // Game constants
+        const GRAVITY = -0.01;
+        const JUMP_FORCE = 0.3;
+        const MOVE_SPEED = 0.03;
+
+        // Level generation seed
+        let levelSeed = 12345;
+
+        // Save data
+        const SAVE_KEY = 'ultimatePlatformerSave';
+
+        function saveGame() {
+            const saveData = {
+                currentLevel: currentLevel,
+                score: score,
+                health: health,
+                deaths: deaths,
+                saveDate: new Date().toISOString()
+            };
+            
+            try {
+                const saveString = JSON.stringify(saveData);
+                // Create a downloadable save file
+                const blob = new Blob([saveString], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `platformer_save_level_${currentLevel}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                showMessage(`Game saved!\nLevel: ${currentLevel}\nScore: ${score}`, false);
+                setTimeout(hideMessage, 2000);
+            } catch (error) {
+                showMessage('Failed to save game!', false);
+                setTimeout(hideMessage, 2000);
+            }
+        }
+
+        function loadGame() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = function(event) {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        try {
+                            const saveData = JSON.parse(e.target.result);
+                            
+                            // Validate save data
+                            if (saveData.currentLevel && typeof saveData.currentLevel === 'number' &&
+                                saveData.score !== undefined && saveData.health !== undefined && 
+                                saveData.deaths !== undefined) {
+                                
+                                currentLevel = saveData.currentLevel;
+                                score = saveData.score;
+                                health = saveData.health;
+                                deaths = saveData.deaths;
+                                
+                                // Update UI
+                                document.getElementById('score').textContent = score;
+                                document.getElementById('health').textContent = health;
+                                document.getElementById('deaths').textContent = deaths;
+                                
+                                // Generate the loaded level
+                                generateLevel();
+                                
+                                const saveDate = new Date(saveData.saveDate).toLocaleDateString();
+                                showMessage(`Game loaded!\nLevel: ${currentLevel}\nScore: ${score}\nSaved: ${saveDate}`, false);
+                                setTimeout(hideMessage, 3000);
+                            } else {
+                                showMessage('Invalid save file!', false);
+                                setTimeout(hideMessage, 2000);
+                            }
+                        } catch (error) {
+                            showMessage('Failed to load save file!', false);
+                            setTimeout(hideMessage, 2000);
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            };
+            input.click();
+        }
+
+        function resetProgress() {
+            if (confirm('Are you sure you want to reset all progress? This cannot be undone!')) {
+                currentLevel = 1;
+                score = 0;
+                health = 3;
+                deaths = 0;
+                
+                document.getElementById('score').textContent = score;
+                document.getElementById('health').textContent = health;
+                document.getElementById('deaths').textContent = deaths;
+                
+                generateLevel();
+                showMessage('Progress reset!\nStarting from level 1', false);
+                setTimeout(hideMessage, 2000);
+            }
+        }
+
+        function autoSave() {
+            // Auto-save every 5 levels
+            if (currentLevel % 5 === 0) {
+                const saveData = {
+                    currentLevel: currentLevel,
+                    score: score,
+                    health: health,
+                    deaths: deaths,
+                    saveDate: new Date().toISOString(),
+                    isAutoSave: true
+                };
+                
+                // Store in memory for session
+                window.gameAutoSave = saveData;
+                
+                showMessage('Auto-saved!', false);
+                setTimeout(hideMessage, 1000);
+            }
+        }
+
+        function init() {
+            // Scene setup
+            scene = new THREE.Scene();
+            
+            // Camera setup
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            // Renderer setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('gameContainer').appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 20, 10);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            directionalLight.shadow.camera.left = -50;
+            directionalLight.shadow.camera.right = 50;
+            directionalLight.shadow.camera.top = 50;
+            directionalLight.shadow.camera.bottom = -50;
+            scene.add(directionalLight);
+
+            // Create player
+            createPlayer();
+            
+            // Check for auto-save
+            if (window.gameAutoSave) {
+                showMessage('Auto-save detected!\nPress Load Game to continue\nfrom your last session', false);
+                setTimeout(hideMessage, 4000);
+            }
+            
+            // Generate first level
+            generateLevel();
+            
+            // Event listeners
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+
+            // Start game loop
+            animate();
+        }
+
+        function createPlayer() {
+            const geometry = new THREE.BoxGeometry(0.8, 1.6, 0.8);
+            const material = new THREE.MeshLambertMaterial({ color: 0xff4444 });
+            player = new THREE.Mesh(geometry, material);
+            player.castShadow = true;
+            scene.add(player);
+        }
+
+        // Seeded random number generator
+        function seededRandom(seed) {
+            const x = Math.sin(seed) * 10000;
+            return x - Math.floor(x);
+        }
+
+        function getDifficultySettings() {
+            if (currentLevel <= 100) {
+                return {
+                    difficulty: "easy",
+                    name: "EASY",
+                    color: "#90EE90",
+                    skyColors: [0x87CEEB, 0x98FB98, 0xF0E68C],
+                    platformCount: 3 + Math.floor(currentLevel / 20),
+                    enemyCount: Math.floor(currentLevel / 25),
+                    collectibleCount: 2 + Math.floor(currentLevel / 10),
+                    jumpDifficulty: 1,
+                    enemySpeed: 0.01,
+                    platformSize: 4
+                };
+            } else if (currentLevel <= 600) {
+                return {
+                    difficulty: "hard",
+                    name: "HARD",
+                    color: "#FF6B47",
+                    skyColors: [0xFF6B47, 0xFF4500, 0xDC143C],
+                    platformCount: 4 + Math.floor((currentLevel - 100) / 50),
+                    enemyCount: 1 + Math.floor((currentLevel - 100) / 30),
+                    collectibleCount: 3 + Math.floor((currentLevel - 100) / 25),
+                    jumpDifficulty: 1.5,
+                    enemySpeed: 0.02,
+                    platformSize: 3
+                };
+            } else {
+                return {
+                    difficulty: "extreme",
+                    name: "EXTREME",
+                    color: "#FF1493",
+                    skyColors: [0xFF1493, 0x8B008B, 0x4B0082],
+                    platformCount: 5 + Math.floor((currentLevel - 600) / 1000),
+                    enemyCount: 2 + Math.floor((currentLevel - 600) / 100),
+                    collectibleCount: 4 + Math.floor((currentLevel - 600) / 500),
+                    jumpDifficulty: 2,
+                    enemySpeed: 0.03,
+                    platformSize: 2
+                };
+            }
+        }
+
+        function generateLevel() {
+            // Clear existing level
+            clearLevel();
+            
+            const settings = getDifficultySettings();
+            levelSeed = currentLevel * 7919; // Prime number for better distribution
+            
+            // Update UI
+            updateUI(settings);
+            
+            // Set environment
+            const skyColor = settings.skyColors[Math.floor(seededRandom(levelSeed) * settings.skyColors.length)];
+            scene.background = new THREE.Color(skyColor);
+            scene.fog = new THREE.Fog(skyColor, 20, 100);
+            renderer.setClearColor(skyColor);
+            
+            // Generate level layout
+            const levelLayout = generateLevelLayout(settings);
+            
+            // Create platforms
+            levelLayout.platforms.forEach(p => {
+                createPlatform(p.x, p.y, p.z, p.w, p.h, p.d, p.color);
+            });
+            
+            // Create collectibles
+            levelLayout.collectibles.forEach(c => {
+                createCollectible(c.x, c.y, c.z);
+            });
+            
+            // Create enemies
+            levelLayout.enemies.forEach(e => {
+                createEnemy(e.x, e.y, e.z, settings.enemySpeed);
+            });
+            
+            // Create exit
+            createExit(levelLayout.exit.x, levelLayout.exit.y, levelLayout.exit.z);
+            
+            // Set player position
+            player.position.set(levelLayout.playerStart.x, levelLayout.playerStart.y, levelLayout.playerStart.z);
+            playerVelocity = { x: 0, y: 0, z: 0 };
+            
+            gameState = "playing";
+        }
+
+        function generateLevelLayout(settings) {
+            const layout = {
+                playerStart: { x: 0, y: 2, z: 0 },
+                platforms: [],
+                collectibles: [],
+                enemies: [],
+                exit: { x: 0, y: 0, z: 0 }
+            };
+            
+            // Starting platform
+            layout.platforms.push({
+                x: 0, y: 0, z: 0,
+                w: 4, h: 1, d: 4,
+                color: 0x228B22
+            });
+            
+            let currentX = 0, currentY = 0, currentZ = 0;
+            
+            // Generate platform path
+            for (let i = 0; i < settings.platformCount; i++) {
+                const random1 = seededRandom(levelSeed + i * 100);
+                const random2 = seededRandom(levelSeed + i * 100 + 1);
+                const random3 = seededRandom(levelSeed + i * 100 + 2);
+                
+                // Next platform position
+                currentX += (random1 - 0.5) * 10 * settings.jumpDifficulty;
+                currentY += (random2 - 0.3) * 4 * settings.jumpDifficulty;
+                currentZ += (random3 - 0.5) * 8 * settings.jumpDifficulty;
+                
+                // Ensure reachable jumps
+                currentY = Math.max(currentY, -2);
+                currentY = Math.min(currentY, 20);
+                
+                const platformColor = i === settings.platformCount - 1 ? 0xFFD700 : 0x8B4513;
+                
+                layout.platforms.push({
+                    x: currentX, y: currentY, z: currentZ,
+                    w: settings.platformSize, h: 1, d: settings.platformSize,
+                    color: platformColor
+                });
+                
+                // Add collectibles
+                if (i < settings.collectibleCount) {
+                    layout.collectibles.push({
+                        x: currentX, y: currentY + 1.5, z: currentZ
+                    });
+                }
+                
+                // Add enemies
+                if (i > 0 && i <= settings.enemyCount) {
+                    layout.enemies.push({
+                        x: currentX, y: currentY + 1, z: currentZ
+                    });
+                }
+            }
+            
+            // Exit at the last platform
+            layout.exit = {
+                x: currentX, y: currentY + 1, z: currentZ
+            };
+            
+            return layout;
+        }
+
+        function updateUI(settings) {
+            document.getElementById('currentLevel').textContent = currentLevel;
+            document.getElementById('maxLevel').textContent = getDifficultyMaxLevel();
+            
+            const difficultyEl = document.getElementById('difficultyName');
+            difficultyEl.textContent = settings.name + ' MODE';
+            difficultyEl.className = settings.difficulty;
+            
+            // Update difficulty info
+            const difficultyInfo = document.getElementById('difficultyInfo');
+            if (settings.difficulty === 'easy') {
+                difficultyInfo.children[1].textContent = `Complete 100 levels to unlock HARD (${100 - currentLevel} left)`;
+            } else if (settings.difficulty === 'hard') {
+                difficultyInfo.children[1].textContent = `Complete 500 HARD levels to unlock EXTREME (${600 - currentLevel} left)`;
+            } else {
+                difficultyInfo.children[1].textContent = `EXTREME MODE - ${100600 - currentLevel} levels remaining!`;
+            }
+            
+            // Total progress
+            const totalProgress = (currentLevel / 100600 * 100).toFixed(3);
+            document.getElementById('totalProgress').textContent = totalProgress + '%';
+        }
+
+        function getDifficultyMaxLevel() {
+            if (currentLevel <= 100) return 100;
+            if (currentLevel <= 600) return 600;
+            return 100600;
+        }
+
+        function clearLevel() {
+            platforms.forEach(p => scene.remove(p));
+            collectibles.forEach(c => scene.remove(c));
+            enemies.forEach(e => scene.remove(e));
+            exits.forEach(e => scene.remove(e));
+            
+            platforms = [];
+            collectibles = [];
+            enemies = [];
+            exits = [];
+        }
+
+        function createPlatform(x, y, z, width, height, depth, color) {
+            const geometry = new THREE.BoxGeometry(width, height, depth);
+            const material = new THREE.MeshLambertMaterial({ color: color });
+            const platform = new THREE.Mesh(geometry, material);
+            platform.position.set(x, y, z);
+            platform.receiveShadow = true;
+            platforms.push(platform);
+            scene.add(platform);
+        }
+
+        function createCollectible(x, y, z) {
+            const geometry = new THREE.SphereGeometry(0.3, 8, 6);
+            const material = new THREE.MeshLambertMaterial({ color: 0xFFD700 });
+            const collectible = new THREE.Mesh(geometry, material);
+            collectible.position.set(x, y, z);
+            collectible.userData = { rotationSpeed: 0.05 };
+            collectibles.push(collectible);
+            scene.add(collectible);
+        }
+
+        function createEnemy(x, y, z, speed) {
+            const geometry = new THREE.BoxGeometry(0.6, 0.6, 0.6);
+            const material = new THREE.MeshLambertMaterial({ color: 0x8B0000 });
+            const enemy = new THREE.Mesh(geometry, material);
+            enemy.position.set(x, y, z);
+            enemy.userData = { 
+                direction: 1, 
+                speed: speed,
+                startX: x,
+                range: 2
+            };
+            enemy.castShadow = true;
+            enemies.push(enemy);
+            scene.add(enemy);
+        }
+
+        function createExit(x, y, z) {
+            const geometry = new THREE.CylinderGeometry(0.8, 0.8, 2, 8);
+            const material = new THREE.MeshLambertMaterial({ 
+                color: 0x00FF00,
+                transparent: true,
+                opacity: 0.7
+            });
+            const exit = new THREE.Mesh(geometry, material);
+            exit.position.set(x, y, z);
+            exit.userData = { rotationSpeed: 0.03 };
+            exits.push(exit);
+            scene.add(exit);
+        }
+
+        function onKeyDown(event) {
+            keys[event.code] = true;
+        }
+
+        function onKeyUp(event) {
+            keys[event.code] = false;
+        }
+
+        function updatePlayer() {
+            if (gameState !== "playing") return;
+            
+            // Apply gravity
+            playerVelocity.y += GRAVITY;
+            
+            // Handle movement
+            const cameraDirection = new THREE.Vector3();
+            camera.getWorldDirection(cameraDirection);
+            cameraDirection.y = 0;
+            cameraDirection.normalize();
+            
+            const right = new THREE.Vector3();
+            right.crossVectors(cameraDirection, new THREE.Vector3(0, 1, 0));
+            
+            if (keys['KeyW']) {
+                playerVelocity.x += cameraDirection.x * MOVE_SPEED;
+                playerVelocity.z += cameraDirection.z * MOVE_SPEED;
+            }
+            if (keys['KeyS']) {
+                playerVelocity.x -= cameraDirection.x * MOVE_SPEED;
+                playerVelocity.z -= cameraDirection.z * MOVE_SPEED;
+            }
+            if (keys['KeyA']) {
+                playerVelocity.x -= right.x * MOVE_SPEED;
+                playerVelocity.z -= right.z * MOVE_SPEED;
+            }
+            if (keys['KeyD']) {
+                playerVelocity.x += right.x * MOVE_SPEED;
+                playerVelocity.z += right.z * MOVE_SPEED;
+            }
+            
+            // Jump
+            if (keys['Space'] && isGrounded) {
+                playerVelocity.y = JUMP_FORCE;
+                isGrounded = false;
+            }
+            
+            // Apply friction
+            playerVelocity.x *= 0.8;
+            playerVelocity.z *= 0.8;
+            
+            // Update position
+            player.position.add(new THREE.Vector3(playerVelocity.x, playerVelocity.y, playerVelocity.z));
+            
+            // Check collisions
+            checkCollisions();
+            
+            // Update camera
+            updateCamera();
+            
+            // Reset if fallen
+            if (player.position.y < -30) {
+                resetPlayer();
+            }
+        }
+
+        function updateCamera() {
+            // Follow player with smooth camera
+            const idealCameraPos = player.position.clone();
+            idealCameraPos.add(new THREE.Vector3(-8, 6, 8));
+            
+            camera.position.lerp(idealCameraPos, 0.05);
+            
+            const lookTarget = player.position.clone();
+            lookTarget.add(new THREE.Vector3(2, 1, 0));
+            camera.lookAt(lookTarget);
+        }
+
+        function checkCollisions() {
+            isGrounded = false;
+            const playerBox = new THREE.Box3().setFromObject(player);
+            
+            // Platform collisions
+            platforms.forEach(platform => {
+                const platformBox = new THREE.Box3().setFromObject(platform);
+                if (playerBox.intersectsBox(platformBox)) {
+                    const overlapY = Math.min(playerBox.max.y - platformBox.min.y, platformBox.max.y - playerBox.min.y);
+                    const overlapX = Math.min(playerBox.max.x - platformBox.min.x, platformBox.max.x - playerBox.min.x);
+                    const overlapZ = Math.min(playerBox.max.z - platformBox.min.z, platformBox.max.z - playerBox.min.z);
+                    
+                    if (overlapY < overlapX && overlapY < overlapZ) {
+                        if (playerVelocity.y < 0 && player.position.y > platform.position.y) {
+                            player.position.y = platformBox.max.y + 0.8;
+                            playerVelocity.y = 0;
+                            isGrounded = true;
+                        }
+                    }
+                }
+            });
+            
+            // Collectible collisions
+            collectibles.forEach((collectible, index) => {
+                if (player.position.distanceTo(collectible.position) < 1) {
+                    scene.remove(collectible);
+                    collectibles.splice(index, 1);
+                    score += 10;
+                    document.getElementById('score').textContent = score;
+                }
+            });
+            
+            // Enemy collisions
+            enemies.forEach(enemy => {
+                if (player.position.distanceTo(enemy.position) < 1) {
+                    health--;
+                    document.getElementById('health').textContent = health;
+                    deaths++;
+                    document.getElementById('deaths').textContent = deaths;
+                    resetPlayer();
+                    if (health <= 0) {
+                        health = 3;
+                        document.getElementById('health').textContent = health;
+                        showMessage('You died! Restarting level...', false);
+                        setTimeout(() => {
+                            generateLevel();
+                            hideMessage();
+                        }, 1500);
+                    }
+                }
+            });
+            
+            // Exit collisions - FIXED VERSION
+            exits.forEach(exit => {
+                if (player.position.distanceTo(exit.position) < 2 && gameState === "playing") {
+                    gameState = "levelComplete"; // Prevent multiple triggers
+                    currentLevel++;
+                    
+                    // Auto-save progress
+                    autoSave();
+                    
+                    if (currentLevel === 101) {
+                        showMessage('🎉 EASY MODE COMPLETE!\nUnlocked HARD MODE!', false);
+                    } else if (currentLevel === 601) {
+                        showMessage('🔥 HARD MODE COMPLETE!\nUnlocked EXTREME MODE!', false);
+                    } else if (currentLevel === 100601) {
+                        showMessage('👑 ULTIMATE CHAMPION!\nYou completed all 100,600 levels!', true);
+                        return;
+                    } else {
+                        showMessage(`Level ${currentLevel - 1} Complete!`, false);
+                    }
+                    
+                    setTimeout(() => {
+                        generateLevel(); // This sets gameState back to "playing"
+                        hideMessage();
+                    }, 2000);
+                }
+            });
+        }
+
+        function updateEnemies() {
+            enemies.forEach(enemy => {
+                enemy.position.x += enemy.userData.direction * enemy.userData.speed;
+                
+                if (enemy.position.x > enemy.userData.startX + enemy.userData.range || 
+                    enemy.position.x < enemy.userData.startX - enemy.userData.range) {
+                    enemy.userData.direction *= -1;
+                }
+            });
+        }
+
+        function updateCollectibles() {
+            collectibles.forEach(collectible => {
+                collectible.rotation.y += collectible.userData.rotationSpeed;
+                collectible.position.y += Math.sin(Date.now() * 0.003 + collectible.position.x) * 0.01;
+            });
+        }
+
+        function updateExits() {
+            exits.forEach(exit => {
+                exit.rotation.y += exit.userData.rotationSpeed;
+            });
+        }
+
+        function resetPlayer() {
+            // Reset to starting position of current level
+            player.position.set(0, 2, 0);
+            playerVelocity = { x: 0, y: 0, z: 0 };
+        }
+
+        function showMessage(text, isGameEnd = false) {
+            const messageEl = document.getElementById('message');
+            messageEl.innerHTML = text.replace(/\n/g, '<br>');
+            messageEl.style.display = 'block';
+            
+            if (isGameEnd) {
+                setTimeout(() => {
+                    alert('Congratulations on this incredible achievement! Restarting game...');
+                    location.reload();
+                }, 5000);
+            }
+        }
+
+        function hideMessage() {
+            document.getElementById('message').style.display = 'none';
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            updatePlayer();
+            updateEnemies();
+            updateCollectibles();
+            updateExits();
+            
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        window.addEventListener('resize', onWindowResize);
+        
+        // Start the game
+        init();
+    </script>
+</body>
+</html>
